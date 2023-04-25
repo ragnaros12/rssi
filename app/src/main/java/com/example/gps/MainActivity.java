@@ -1,14 +1,21 @@
 package com.example.gps;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.graphics.PointF;
+import android.graphics.Rect;
+import android.graphics.RectF;
 import android.os.Bundle;
-import android.util.Log;
-import android.widget.TextView;
-import android.widget.Toast;
+import android.view.SurfaceHolder;
 
 import androidx.annotation.Nullable;
+
+import com.example.gps.databinding.ActivityMainBinding;
 
 import org.altbeacon.beacon.Beacon;
 import org.altbeacon.beacon.BeaconManager;
@@ -17,7 +24,6 @@ import org.altbeacon.beacon.RangeNotifier;
 import org.altbeacon.beacon.Region;
 
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.Iterator;
 
 import pub.devrel.easypermissions.AfterPermissionGranted;
@@ -25,114 +31,127 @@ import pub.devrel.easypermissions.EasyPermissions;
 
 public class MainActivity extends Activity implements RangeNotifier {
     private BeaconManager mBeaconManager;
-    HashMap<String, PointF> points;
-    private final int permCode = 100;
+    private ActivityMainBinding binding;
+    SurfaceHolder holder;
+    int scale = 1;
+    boolean isRunning = false;
+    Region region = new Region("beacon region", null, null, null);
+
+    Bitmap back;
+    Bitmap point;
+
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
+        binding = ActivityMainBinding.inflate(getLayoutInflater());
+        setContentView(binding.getRoot());
 
-        points = new HashMap<>();
-        points.put("33333333-3333-3333-3333-333333333333", new PointF(0, 0));
-        points.put("22222222-2222-2222-2222-222222222222", new PointF(0, 0.8f));
-        points.put("11111111-1111-1111-1111-111111111111", new PointF(0.8f, 0));
+        back = BitmapFactory.decodeResource(getResources(), R.drawable.back);
+        point = BitmapFactory.decodeResource(getResources(), R.drawable.point);
 
-        start();
+        binding.containedButton.setOnClickListener(v -> {
+            start();
+        });
     }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         EasyPermissions.onRequestPermissionsResult(requestCode, permissions, grantResults, this);
     }
-    @AfterPermissionGranted(permCode)
+
+    @AfterPermissionGranted(StaticData.PERMISSIONS_CODE)
     private void start() {
-        String[] perms = {android.Manifest.permission.BLUETOOTH_ADMIN,android.Manifest.permission.BLUETOOTH_SCAN,android.Manifest.permission.BLUETOOTH_CONNECT
+        String[] perms = {android.Manifest.permission.BLUETOOTH_ADMIN, android.Manifest.permission.BLUETOOTH_SCAN, android.Manifest.permission.BLUETOOTH_CONNECT
                 , android.Manifest.permission.BLUETOOTH, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION};
         if (EasyPermissions.hasPermissions(this, perms)) {
+            if (isRunning) {
+                isRunning = false;
+                binding.thirdRssi.setText("PAUSED");
+                binding.firstRssi.setText("PAUSED");
+                binding.secondRssi.setText("PAUSED");
+                binding.containedButton.setText("Start");
+                mBeaconManager.stopRangingBeacons(region);
+                return;
+            }
+            holder = binding.canvasData.getHolder();
+
             mBeaconManager = BeaconManager.getInstanceForApplication(this.getApplicationContext());
             mBeaconManager.getBeaconParsers().add(new BeaconParser().
-                    setBeaconLayout("m:2-3=0215,i:4-19,i:20-21,i:22-23,p:24-24"));
-            Region region = new Region("beacon region", null, null, null);
+                    setBeaconLayout(StaticData.BEACON_TYPE));
             mBeaconManager.addRangeNotifier(this);
             mBeaconManager.startRangingBeacons(region);
+
+            binding.containedButton.setText("Stop");
+            isRunning = true;
         } else {
             EasyPermissions.requestPermissions(this, getString(R.string.app_name),
-                    permCode, perms);
+                    StaticData.PERMISSIONS_CODE, perms);
         }
     }
 
+
+    @SuppressLint("DefaultLocale")
     @Override
     public void didRangeBeaconsInRegion(Collection<Beacon> beacons, Region region) {
-        TextView info = findViewById(R.id.info);
-        if (beacons.size() < 3) {
-            info.setText("датчиков меньше чем 3");
-            return;
-        }
-        StringBuilder builder = new StringBuilder();
-
+        if(!isRunning) return;
         Iterator<Beacon> iterator = beacons.iterator();
 
+        if (!iterator.hasNext()) {
+            binding.firstRssi.setText("Нет сигнала");
+            binding.secondRssi.setText("Нет сигнала");
+            binding.thirdRssi.setText("Нет сигнала");
+            return;
+        }
         Beacon beacon = iterator.next();
         double distance1 = beacon.getDistance();
-        PointF point1 = points.get(beacon.getId1().toUuid().toString());
+        PointF point1 = StaticData.getPoints().get(beacon.getId1().toUuid().toString());
+        binding.firstRssi.setText(String.format("Дистанция: %.3f", distance1));
 
-        builder.append("1 маячок: позиция ").append(point1.x).append(":").append(point1.y).append(",").append("RSSI ").append(beacon.getRssi()).append(", длина ")
-                .append(distance1).append("\n");
+        if (!iterator.hasNext()) {
+            binding.secondRssi.setText("Нет сигнала");
+            binding.thirdRssi.setText("Нет сигнала");
+            return;
+        }
 
         beacon = iterator.next();
         double distance2 = beacon.getDistance();
-        PointF point2 = points.get(beacon.getId1().toUuid().toString());
-        builder.append("2 маячок: позиция ").append(point2.x).append(":").append(point2.y).append(",").append("RSSI ").append(beacon.getRssi()).append(", длина ")
-                .append(distance2).append("\n");
+        PointF point2 = StaticData.getPoints().get(beacon.getId1().toUuid().toString());
+        binding.secondRssi.setText(String.format("Дистанция: %.3f", distance2));
 
+
+        if (!iterator.hasNext()) {
+            binding.thirdRssi.setText("Нет сигнала");
+            return;
+        }
 
         beacon = iterator.next();
         double distance3 = beacon.getDistance();
-        PointF point3 = points.get(beacon.getId1().toUuid().toString());
-        builder.append("3 маячок: позиция ").append(point3.x).append(":").append(point3.y).append(",").append("RSSI ").append(beacon.getRssi()).append(", длина ")
-                .append(distance3).append("\n");
+        PointF point3 = StaticData.getPoints().get(beacon.getId1().toUuid().toString());
+        binding.thirdRssi.setText(String.format("Дистанция: %.3f", distance3));
 
 
-        PointF pointF = getCoordinates(point1, distance1, point2, distance2, point3, distance3);
-        builder.append("Резльутат алгоритма: ").append(pointF.x).append(":").append(pointF.y);
+        PointF pointF = StaticData.getCoordinates(point1, distance1, point2, distance2, point3, distance3);
 
-        info.setText(builder.toString());
+        Canvas canvas = holder.lockCanvas();
+
+        canvas.save();
+        canvas.scale(scale, scale);
+        int x = canvas.getWidth() / 2, y = canvas.getHeight() / 2;
+
+
+        canvas.drawRect(new RectF(0,0, canvas.getWidth(), canvas.getHeight()), StaticData.LINE);
+        canvas.drawBitmap(back, new Rect(0,0, back.getWidth(), back.getHeight()),
+                new Rect(0,0, canvas.getWidth(), canvas.getHeight()), new Paint());
+
+
+
+        canvas.drawBitmap(point, pointF.x * x, pointF.y * y, new Paint());
+
+        canvas.restore();
+
+        holder.unlockCanvasAndPost(canvas);
+
     }
-
-    public PointF getCoordinates(PointF point1, double distance1, PointF point2, double distance2, PointF point3, double distance3) {
-        Log.e("coor", point1.x + " " + point1.y + " " + distance1);
-        Log.e("coor", point2.x + " " + point2.y + " " + distance2);
-        Log.e("coor", point3.x + " " + point3.y + " " + distance3);
-
-        double firstVarX = point2.x - point1.x, firstVarY = point2.y - point1.y,
-                firstSum = 0.5 * (point2.x * point2.x - point1.x * point1.x + point2.y * point2.y - point1.y * point1.y + distance1 * distance1 - distance2 * distance2);
-        double secondVarX = point3.x - point1.x, secondVarY = point3.y - point1.y,
-                secondSum = 0.5 * (point3.x * point3.x - point1.x * point1.x + point3.y * point3.y - point1.y * point1.y + distance1 * distance1 - distance3 * distance3);
-
-
-        double prevFirstVarX = firstVarX, prevSum = firstSum;
-
-        if(firstVarY != 0) {
-            secondVarY /= firstVarY;
-
-            prevFirstVarX *= secondVarY;
-            prevSum *= secondVarY;
-        }
-        else{
-            secondVarX = 0;
-            secondSum = 0;
-        }
-
-
-        double lastX = prevFirstVarX - secondVarX;
-        double lastSum = prevSum - secondSum;
-
-        double responseX = lastSum / lastX;
-        double responseY = (firstSum - responseX * firstVarX) / firstVarY;
-
-
-        return new PointF((float)responseX, (float)responseY);
-    }
-
 }
